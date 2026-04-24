@@ -33,6 +33,7 @@ import warnings
 
 from platform_components.lib.logger.logger_config import configure_logging
 from platform_components.lib.modules.exceptions import NodeInitializationError
+from platform_components.lib.logger.error_handling import get_logger
 
 warnings.filterwarnings("ignore")
 
@@ -50,7 +51,7 @@ app.add_middleware(
 
 
 configure_logging("aggregator_server")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 logger.setLevel(logging.INFO)  # Excludes WARNING, ERROR, CRITICAL
 
 # Initialize the Aggregator instance
@@ -67,6 +68,8 @@ training_processes = {}
 class InitRequest(BaseModel):
     nodeUrls: list[str]
     index: str
+    is_aggregator: bool = False   # per-node DFL override (applies to all nodes in this request)
+    min_params: int = 1           # min submodels before DFL nodes aggregate
 
 class TrainingRequest(BaseModel):
     totalRounds: int
@@ -95,16 +98,16 @@ def init(request: InitRequest):
     try:
         # Initialize the nodes on specified index and send the contract address
         node_urls, index = request.nodeUrls, request.index
+        is_aggregator = request.is_aggregator
+        min_params = request.min_params
 
         module_name = os.getenv("MODULE_NAME")
         module_file = os.getenv("MODULE_FILE")
 
-        # module_name, module_file = request.module, request.module_file
-        # db_name = request.db_name
         db_name = os.getenv("LOGICAL_DATABASE")
 
         # Verify filepath exists
-        module_path = os.path.join(aggregator.training_app_dir, module_file)
+        module_path = os.path.join(os.getenv("TRAINING_APPLICATION_DIR"), module_file)
         module_path = os.path.join(os.getenv("GITHUB_DIR"), module_path)
         if not os.path.exists(module_path):
             raise FileNotFoundError(f"Module '{module_file}' does not exist within the given path: '{module_path}'.")
@@ -116,9 +119,9 @@ def init(request: InitRequest):
         if not index in aggregator.round_number:
             aggregator.round_number[index] = 1
 
-        initialize_nodes(node_urls, index)
+        initialize_nodes(node_urls, index, is_aggregator, min_params)
 
-        aggregator.set_module_at_index(index, module_name, module_path)
+        aggregator.set_module_at_index(index, module_name, module_file)
         aggregator.initialize_index_on_blockchain(index, module_name, module_path, db_name)
         aggregator.initialize_training_app_on_index(index)
         aggregator.initialize_file_write_paths_on_index(index)
@@ -158,7 +161,7 @@ def is_node_online(node_url: str):
     except requests.exceptions.RequestException:
         return False
 
-def initialize_nodes(node_urls: list[str], index):
+def initialize_nodes(node_urls: list[str], index, is_aggregator=False, min_params=1):
     """Send the deployed contract address to multiple node servers."""
     def init_node(node_url: str):
         try:
@@ -191,7 +194,9 @@ def initialize_nodes(node_urls: list[str], index):
                 'replica_port': ip_port[1],
                 'replica_name': replica_name,
                 'replica_index': index,
-                'round_number': aggregator.round_number[index]
+                'round_number': aggregator.round_number[index],
+                'is_aggregator': is_aggregator,
+                'min_params': min_params
             })
 
             # init end_round
@@ -323,7 +328,7 @@ def start_training(aggregator, initial_params, starting_round, end_round, index)
             # aggregator.store_most_recent_agg_params(initial_params, index, starting_round)
 
             # Then, update aggregator's model at 'index'
-            local_path_of_initial_params = f"{aggregator.file_write_destination}/{index}/{r}-{aggregator.agg_name}_update.json"
+            local_path_of_initial_params = f"{aggregator.file_write_destination}/{index}/{r}-{aggregator.name}_update.json"
             with open(local_path_of_initial_params, "rb") as f:
                 data = pickle.load(f)
 
@@ -333,7 +338,7 @@ def start_training(aggregator, initial_params, starting_round, end_round, index)
                 aggregator.logger.error(f"[{index}] Invalid data or 'newUpdates' missing in Firestore response: {data}")
                 raise ValueError(f"[{index}] Invalid data or 'newUpdates' missing in Firestore response: {data}")
 
-            aggregator.training_apps[index].update_model(weights)
+            aggregator.data_handlers[index].update_model(weights)
 
 
 

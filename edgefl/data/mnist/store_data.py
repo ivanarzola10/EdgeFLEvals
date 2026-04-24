@@ -71,7 +71,7 @@ def main():
         train_images = train_dataset.data[train_idx:train_end]
         train_labels = train_dataset.targets[train_idx:train_end]
 
-        json_train = [{"image": img.numpy().flatten().tolist(), "label": int(label), "round_number": round_num} for img, label in zip(train_images, train_labels)]
+        json_train = [{"image": json.dumps(img.numpy().flatten().tolist()), "label": int(label), "round_number": round_num} for img, label in zip(train_images, train_labels)]
         # json_train = json.dumps(rows)
         header = create_header(db_name=args.db_name, table_name="mnist_train")
 
@@ -85,7 +85,7 @@ def main():
         test_images = test_dataset.data[test_idx:test_end]
         test_labels = test_dataset.targets[test_idx:test_end]
 
-        json_test = [{"image": img.numpy().flatten().tolist(), "label": int(label), "round_number": round_num} for img, label in
+        json_test = [{"image": json.dumps(img.numpy().flatten().tolist()), "label": int(label), "round_number": round_num} for img, label in
                 zip(test_images, test_labels)]
         # json_test = json.dumps(rows)
         header = create_header(db_name=args.db_name, table_name="mnist_test")
