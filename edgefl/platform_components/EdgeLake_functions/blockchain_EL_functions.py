@@ -6,6 +6,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/
 
 
 from asyncio import sleep
+from typing import overload
 
 import requests
 import socket
@@ -75,40 +76,26 @@ def check_policy_inserted(el_url, policy):
 
         return False
 
-def get_policies(el_url, policy_type='*', condition=None):
-    command = f'blockchain get {policy_type} {condition if condition else ""}'
+@overload
+def get_policies(el_url: str, policy_type: str = "*", condition: str | None = None) -> list: ...
+
+@overload
+def get_policies(el_url: str, *, index: str, condition: str | None = None) -> list: ...
+
+def get_policies(el_url: str, policy_type: str = "*", condition: str | None = None, *, index: str | None = None,) -> list:
+    key = index if index is not None else policy_type
+    command = f"blockchain get {key} {condition if condition else ""}"
     headers = {
-        'User-Agent': 'AnyLog/1.23',
-        'Content-Type': 'text/plain',
-        'command': command
+        "User-Agent": "AnyLog/1.23",
+        "Content-Type": "text/plain",
+        "command": command,
     }
     response = requests.get(el_url, headers=headers)
     if response.status_code != 200:
         raise Exception(f"Request failed with status code {response.status_code}: {response.reason}. Command: {command}")
-
-    data = response.json() # [{policy_name: {..., 'id': ..., ...}}]
-    policies = []
-    for policy in data:
-        policies.append(policy[policy_type])
-    return policies # [{'attr1': ..., 'attr2': ..., ...}, {'attr1': ..., 'attr2': ..., ...}, ...]
-
-def get_policies(el_url, index='*', condition=None):
-    command = f'blockchain get {index} {condition if condition else ""}'
-    headers = {
-        'User-Agent': 'AnyLog/1.23',
-        'Content-Type': 'text/plain',
-        'command': command
-    }
-    response = requests.get(el_url, headers=headers)
-    if response.status_code != 200:
-        raise Exception(f"Request failed with status code {response.status_code}: {response.reason}. Command: {command}")
-
-    data = response.json() # [{policy_name: {..., 'id': ..., ...}}]
-    policies = []
-    for policy in data:
-        policies.append(policy[index])
-    return policies # [{'attr1': ..., 'attr2': ..., ...}, {'attr1': ..., 'attr2': ..., ...}, ...]
-
+    data = response.json()
+    # [{'attr1': ..., 'attr2': ..., ...}, {'attr1': ..., 'attr2': ..., ...}, ...]
+    return [policy[key] for policy in data]
 
 def get_policy_id_by_name(el_url, policy_name):
     headers = {
@@ -122,6 +109,43 @@ def get_policy_id_by_name(el_url, policy_name):
         return None
     policy_id = data[0][policy_name]['id'] # [{policy_name: {..., 'id': ..., ...}}]
     return policy_id
+
+def get_latest_policy_value(el_url: str, policy_name: str, condition: str, key: str) -> str | None:
+    headers = {
+        "User-Agent": "AnyLog/1.23",
+        "Content-Type": "text/plain",
+        "command": f"blockchain get {policy_name} {condition} bring.recent [*][{key}]",
+    }
+    response = requests.get(el_url, headers=headers)
+    response.raise_for_status()
+    if not response:
+        return None
+    return response.content.decode("utf-8").strip()
+
+
+def get_max_policy_value(el_url: str, policy_name: str, condition: str, key: str):
+    headers = {
+        "User-Agent": "AnyLog/1.23",
+        "Content-Type": "text/plain",
+        "command": f"blockchain get {policy_name} {condition} bring.max [*][{key}]",
+    }
+    response = requests.get(el_url, headers=headers)
+    response.raise_for_status()
+    if not response:
+        return None
+    return response.content.decode("utf-8").strip()
+
+def get_min_policy_value(el_url: str, policy_name: str, condition: str, key: str):
+    headers = {
+        "User-Agent": "AnyLog/1.23",
+        "Content-Type": "text/plain",
+        "command": f"blockchain get {policy_name} {condition} bring.min [*][{key}]",
+    }
+    response = requests.get(el_url, headers=headers)
+    response.raise_for_status()
+    if not response:
+        return None
+    return response.content.decode("utf-8").strip()
 
 def get_all_databases(edgelake_node_url):
     """
