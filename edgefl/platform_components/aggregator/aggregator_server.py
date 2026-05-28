@@ -68,8 +68,6 @@ training_processes = {}
 class InitRequest(BaseModel):
     nodeUrls: list[str]
     index: str
-    is_aggregator: bool = False   # per-node DFL override (applies to all nodes in this request)
-    min_params: int = 1           # min submodels before DFL nodes aggregate
 
 class TrainingRequest(BaseModel):
     totalRounds: int
@@ -98,8 +96,6 @@ def init(request: InitRequest):
     try:
         # Initialize the nodes on specified index and send the contract address
         node_urls, index = request.nodeUrls, request.index
-        is_aggregator = request.is_aggregator
-        min_params = request.min_params
 
         module_name = os.getenv("MODULE_NAME")
         module_file = os.getenv("MODULE_FILE")
@@ -119,7 +115,7 @@ def init(request: InitRequest):
         if not index in aggregator.round_number:
             aggregator.round_number[index] = 1
 
-        initialize_nodes(node_urls, index, is_aggregator, min_params)
+        initialize_nodes(node_urls, index)
 
         aggregator.set_module_at_index(index, module_name, module_file)
         aggregator.initialize_index_on_blockchain(index, module_name, module_path, db_name)
@@ -161,7 +157,7 @@ def is_node_online(node_url: str):
     except requests.exceptions.RequestException:
         return False
 
-def initialize_nodes(node_urls: list[str], index, is_aggregator=False, min_params=1):
+def initialize_nodes(node_urls: list[str], index):
     """Send the deployed contract address to multiple node servers."""
     def init_node(node_url: str):
         try:
@@ -194,9 +190,7 @@ def initialize_nodes(node_urls: list[str], index, is_aggregator=False, min_param
                 'replica_port': ip_port[1],
                 'replica_name': replica_name,
                 'replica_index': index,
-                'round_number': aggregator.round_number[index],
-                'is_aggregator': is_aggregator,
-                'min_params': min_params
+                'round_number': aggregator.round_number[index]
             })
 
             # init end_round
