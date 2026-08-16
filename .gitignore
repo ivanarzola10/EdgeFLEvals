@@ -10,3 +10,13 @@ edgefl/data/chest_xrays_bbox/raw/
 venv/
 .vscode/
 todo.txt
+# Harness: per-machine profile + generated run artifacts
+edgefl/harness/host_profile.py
+edgefl/harness/runs/
+# Large local-only image, not meant for git history
+AnyLog-ARM.tar
+# DFL working notes, kept local
+edgefl/platform_components/node/dflFeatures.txt
+edgefl/platform_components/node/dflPlan.txt
+# Project glossary, not part of this PR
+CONTEXT.md

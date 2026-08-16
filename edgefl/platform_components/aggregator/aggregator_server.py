@@ -13,6 +13,7 @@ from fastapi.responses import PlainTextResponse
 
 
 from platform_components.aggregator.aggregator import Aggregator
+from platform_components.benchmarking import get_benchmarker
 import asyncio
 import logging
 import pickle
@@ -398,6 +399,18 @@ async def update_minParams(request: UpdatedMinParamsRequest):
         )
 
 
+def _node_id_from_params_link(link):
+    """Numeric node id parsed from a submodel path '{round}-{name}_update.json',
+    or None if the name carries no digits."""
+    try:
+        stem = os.path.basename(link).split("_update")[0]   # e.g. "3-node2"
+        name = stem.split("-", 1)[1]                        # "node2"
+        digits = "".join(c for c in name if c.isdigit())
+        return int(digits) if digits else None
+    except Exception:
+        return None
+
+
 async def listen_for_update_agg(min_params, round_number, index):
     """Asynchronously poll for aggregated parameters from the blockchain."""
     logger.info(f"[{index}] listening for updates...")
@@ -406,6 +419,9 @@ async def listen_for_update_agg(min_params, round_number, index):
     # TODO: update min_params here with aggregator.min_params since the update_minParams request doesn't affect here
     #  as of now
     decoded_params = {} # { 'node_params_link': 'decoded_param' }
+    # Submodel arrival times keyed like decoded_params, at the poll loop's ~2s
+    # resolution — feeds first_to_last_arrival_s and straggling_node_id.
+    arrival_ts = {}
     check_chances = 5 # Once this reaches <= 0, we will ignore min_params and handle accordingly
     while True:
         try:
@@ -438,6 +454,7 @@ async def listen_for_update_agg(min_params, round_number, index):
                 ]
 
                 # Updates decoded_params with newly fetched decoded params (with node link as key)
+                already_fetched = set(decoded_params)
                 aggregator.fetch_decoded_params(
                     decoded_params_dict=decoded_params,
                     node_param_download_links=node_params_links,
@@ -445,15 +462,33 @@ async def listen_for_update_agg(min_params, round_number, index):
                     rest_ip_ports=rest_ip_ports,
                     index=index
                 )
+                now = time.time()
+                for link in set(decoded_params) - already_fetched:
+                    arrival_ts[link] = now
 
             # If enough parameters or not getting ALL parameters in time, get the URL
             if len(decoded_params) >= min_params or (decoded_params and not check_chances):
+                benchmarker = get_benchmarker()
+                if len(arrival_ts) >= 2:
+                    first_link = min(arrival_ts, key=arrival_ts.get)
+                    last_link = max(arrival_ts, key=arrival_ts.get)
+                    benchmarker.record_simple_metric(
+                        index, round_number, "agg", "first_to_last_arrival_s",
+                        arrival_ts[last_link] - arrival_ts[first_link])
+                    straggler = _node_id_from_params_link(last_link)
+                    if straggler is not None:
+                        benchmarker.record_simple_metric(
+                            index, round_number, "agg", "straggling_node_id", straggler)
 
+                aggregation_started = time.time()
                 aggregated_params_link = aggregator.aggregate_model_params(
                     decoded_params=list(decoded_params.values()),
                     round_number=round_number,
                     index=index
                 )
+                benchmarker.record_simple_metric(
+                    index, round_number, "agg", "aggregation_time_s",
+                    time.time() - aggregation_started)
                 return aggregated_params_link
 
             # TODO: Adjust this to decrement with >=0 decoded params, but based on nodes' training process

@@ -8,6 +8,7 @@ from fastapi.responses import PlainTextResponse
 
 from platform_components.EdgeLake_functions.blockchain_EL_functions import get_local_ip, \
     connect_to_db, get_all_databases
+from platform_components.benchmarking import get_benchmarker
 from platform_components.node.node import Node
 import asyncio
 import logging
@@ -525,6 +526,9 @@ def listen_for_start_round(nodeInstance, index, stop_event):
     current_round = nodeInstance.round_number[index]
     is_dfl = nodeInstance.is_aggregator.get(index, False)
 
+    benchmarker = get_benchmarker()
+    round_wait_started = time.time()
+
     logger.info(f"[{index}][Round {current_round}] Listening for start round {current_round}"
                 + (" (DFL mode)" if is_dfl else ""))
     while True:
@@ -556,10 +560,18 @@ def listen_for_start_round(nodeInstance, index, stop_event):
 
                 if round_data:
                     logger.debug(f"[{index}] Round Data: {round_data}")
+                    benchmarker.record_simple_metric(
+                        index, current_round, nodeInstance.replica_name,
+                        "polling_time_s", time.time() - round_wait_started)
+
                     paramsLink = round_data.get('initParams', '')
                     ip_port = round_data.get('ip_port', '')
                     rest_ip_port = round_data.get('rest_ip_port', '')
+                    training_started = time.time()
                     modelUpdate_metadata = nodeInstance.train_model_params(paramsLink, current_round, ip_port, rest_ip_port, index)
+                    benchmarker.record_simple_metric(
+                        index, current_round, nodeInstance.replica_name,
+                        "training_time_s", time.time() - training_started)
 
                     # Re-tag to the network's latest round if skip-mode says we're lagging.
                     publish_round = _apply_skip_drift_if_needed(current_round, index)
@@ -568,6 +580,9 @@ def listen_for_start_round(nodeInstance, index, stop_event):
 
                     nodeInstance.add_node_params(current_round, modelUpdate_metadata, index)
                     logger.info(f"[{index}][Round {current_round}] Step 3 Complete: Model parameters published")
+                    benchmarker.record_simple_metric(
+                        index, current_round, nodeInstance.replica_name,
+                        "total_round_time_s", time.time() - round_wait_started)
 
                     # DFL: after training and publishing, aggregate from peers
                     if is_dfl:
@@ -584,6 +599,7 @@ def listen_for_start_round(nodeInstance, index, stop_event):
                     _apply_pause_drift(nodeInstance, current_round, index)
 
                     current_round += 1
+                    round_wait_started = time.time()
                     logger.info(f"[{index}][Round {current_round}] Listening for start round {current_round}")
 
             time.sleep(5)
@@ -638,11 +654,15 @@ def dfl_aggregate_round(nodeInstance, round_number, index):
 
             if len(decoded_params) >= min_params or (decoded_params and not check_chances):
                 # Aggregate
+                aggregation_started = time.time()
                 aggregated_params_link = nodeInstance.aggregate_model_params(
                     decoded_params=list(decoded_params.values()),
                     round_number=round_number,
                     index=index
                 )
+                get_benchmarker().record_simple_metric(
+                    index, round_number, nodeInstance.replica_name,
+                    "aggregation_time_s", time.time() - aggregation_started)
                 logger.info(f"[{index}][Round {round_number}] DFL: Aggregated {len(decoded_params)} submodels")
 
                 # Update local model with aggregated weights
