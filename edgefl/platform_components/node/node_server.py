@@ -634,6 +634,14 @@ def listen_for_start_round(nodeInstance, index, stop_event):
                         index, current_round, nodeInstance.replica_name,
                         "total_round_time_s", time.time() - round_wait_started)
 
+                    # Mirror this round's post-training accuracy into benchmarkfl so it
+                    # lands in the harness CSV alongside the timing metrics. The
+                    # node_accuracy table below stays the source of truth for rollback;
+                    # this is the same number in the benchmarking long format.
+                    benchmarker.record_simple_metric(
+                        index, current_round, nodeInstance.replica_name,
+                        "round_accuracy", result['final_accuracy'])
+
                     # Write initial_accuracy and final_accuracy for this round to AnyLog
                     # table "node_accuracy" — also the source auto-rollback reads from.
                     nodeInstance.push_accuracy(index, current_round, result['initial_accuracy'],

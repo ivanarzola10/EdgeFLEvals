@@ -6,6 +6,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/
 import json
 import os
 import pickle
+import time
 from asyncio import sleep
 
 import requests
@@ -64,12 +65,19 @@ class Node(BaseFLParticipant):
     def add_node_params(self, round_number, model_metadata, index):
         self.logger.debug(f"[{index}] in add_node_params")
         try:
+            # Stamped once, before the retry loop: a retry must re-send a byte-identical
+            # policy or check_policy_inserted() below can't match it. This is the node's
+            # own view of when it finished the round, which is what makes
+            # first_to_last_arrival_s measure node lateness rather than aggregator
+            # polling jitter.
+            published_ts = time.time()
             data = f'''<my_policy = {{"{index}" : {{
                                 "node" : "{self.replica_name}",
                                 "round_number" : {round_number},
                                 "policy_type": "submodel",
                                 "index": "{index}",
                                 "node_type": "training",
+                                "published_ts": {published_ts},
                                 "ip_port": "{self.edgelake_tcp_node_ip_port}",
                                 "rest_ip_port": "{self.edgelake_node_url}",
                                 "trained_params_local_path": "{model_metadata}"
